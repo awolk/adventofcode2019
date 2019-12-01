@@ -23,7 +23,7 @@ fn total_fuel_required(mass: i32) -> i32 {
     if fuel_for_mass < 0 {
         0
     } else {
-        return fuel_for_mass + total_fuel_required(fuel_for_mass)
+        fuel_for_mass + total_fuel_required(fuel_for_mass)
     }
 }
 
