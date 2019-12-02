@@ -1,32 +1,67 @@
-fn parse(input: &str) -> Vec<usize> {
-    input
-        .split(',')
-        .map(|x| x.parse().expect("expected integer"))
-        .collect()
-}
+struct Program(Vec<usize>);
 
-fn eval(program: &mut [usize]) {
-    let mut pc = 0;
-    loop {
-        match program[pc] {
-            1 => program[program[pc + 3]] = program[program[pc + 1]] + program[program[pc + 2]],
-            2 => program[program[pc + 3]] = program[program[pc + 1]] * program[program[pc + 2]],
-            99 => return,
-            _ => panic!("invalid opcode")
-        }
-        pc += 4;
+impl From<&str> for Program {
+    fn from(source: &str) -> Program {
+        Program(
+            source
+                .split(',')
+                .map(|item| item.parse().expect("expected positive integer"))
+                .collect(),
+        )
     }
 }
 
-fn restore(program: &mut [usize]) {
-    program[1] = 12;
-    program[2] = 2;
+impl Program {
+    fn restore(&mut self, noun: usize, verb: usize) {
+        self.0[1] = noun;
+        self.0[2] = verb;
+    }
+
+    fn eval(&mut self) {
+        let mem: &mut [usize] = &mut self.0;
+        let mut ic = 0;
+
+        loop {
+            match mem[ic] {
+                1 => mem[mem[ic + 3]] = mem[mem[ic + 1]] + mem[mem[ic + 2]],
+                2 => mem[mem[ic + 3]] = mem[mem[ic + 1]] * mem[mem[ic + 2]],
+                99 => return,
+                _ => panic!("invalid opcode"),
+            }
+
+            ic += 4;
+        }
+    }
+
+    fn output(&self) -> usize {
+        self.0[0]
+    }
+}
+
+fn part1(input: &str) {
+    let mut program = Program::from(input);
+    program.restore(12, 2);
+    program.eval();
+    println!("Part 1 result: {}", program.output());
+}
+
+fn part2(input: &str) {
+    for noun in 0..100 {
+        for verb in 0..100 {
+            let mut program = Program::from(input);
+            program.restore(noun, verb);
+            program.eval();
+
+            if program.output() == 19690720 {
+                println!("Part 2 result: {}", 100 * noun + verb);
+                return;
+            }
+        }
+    }
 }
 
 fn main() {
     let input = include_str!("input.txt");
-    let mut program = parse(input);
-    restore(&mut program);
-    eval(&mut program);
-    println!("Position 0: {}", program[0]);
+    part1(input);
+    part2(input);
 }
