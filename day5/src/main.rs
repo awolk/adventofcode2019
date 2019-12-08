@@ -9,6 +9,10 @@ enum Opcode {
     Input,
     Output,
     Halt,
+    JumpIfTrue,
+    JumpIfFalse,
+    LessThan,
+    Equals
 }
 
 struct Instruction {
@@ -28,14 +32,18 @@ impl Instruction {
     }
 
     fn parse_opcode(opcode: &str) -> Result<Opcode, &'static str> {
-        match opcode {
-            "01" => Ok(Opcode::Add),
-            "02" => Ok(Opcode::Multiply),
-            "03" => Ok(Opcode::Input),
-            "04" => Ok(Opcode::Output),
-            "99" => Ok(Opcode::Halt),
-            _ => Err("invalid opcode"),
-        }
+        Ok(match opcode {
+            "01" => Opcode::Add,
+            "02" => Opcode::Multiply,
+            "03" => Opcode::Input,
+            "04" => Opcode::Output,
+            "05" => Opcode::JumpIfTrue,
+            "06" => Opcode::JumpIfFalse,
+            "07" => Opcode::LessThan,
+            "08" => Opcode::Equals,
+            "99" => Opcode::Halt,
+            _ => return Err("invalid opcode"),
+        })
     }
 
     fn parse(instr: i32) -> Result<Instruction, &'static str> {
@@ -124,6 +132,38 @@ impl<'a> Emulator<'a> {
                 println!("Output: {}", arg);
                 self.ip += 2;
             }
+            Opcode::JumpIfTrue => {
+                let cond = self.get_arg_val(1, instr.p1_mode);
+                let dest = self.get_arg_val(2, instr.p2_mode);
+                if cond != 0 {
+                    self.ip = dest;
+                } else {
+                    self.ip += 3;
+                }
+            }
+            Opcode::JumpIfFalse => {
+                let cond = self.get_arg_val(1, instr.p1_mode);
+                let dest = self.get_arg_val(2, instr.p2_mode);
+                if cond == 0 {
+                    self.ip = dest;
+                } else {
+                    self.ip += 3;
+                }
+            }
+            Opcode::LessThan => {
+                let arg1 = self.get_arg_val(1, instr.p1_mode);
+                let arg2 = self.get_arg_val(2, instr.p2_mode);
+                let res_addr = self.get(self.ip + 3);
+                self.store(res_addr, (arg1 < arg2) as i32);
+                self.ip += 4;
+            }
+            Opcode::Equals => {
+                let arg1 = self.get_arg_val(1, instr.p1_mode);
+                let arg2 = self.get_arg_val(2, instr.p2_mode);
+                let res_addr = self.get(self.ip + 3);
+                self.store(res_addr, (arg1 == arg2) as i32);
+                self.ip += 4;
+            }
             Opcode::Halt => {
                 self.halted = true;
             }
@@ -147,7 +187,18 @@ fn part1(program: &str) {
     emulator.run().expect("failed to run program");
 }
 
+fn part2(program: &str) {
+    let input = [5];
+    let mut emulator = Emulator::new(program, &input).expect("failed to parse program");
+    emulator.run().expect("failed to run program");
+}
+
 fn main() {
     let input = include_str!("input.txt");
+    println!("Part 1:");
+    println!("-------");
     part1(input);
+    println!("Part 2:");
+    println!("-------");
+    part2(input);
 }
