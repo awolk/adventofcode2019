@@ -23,36 +23,34 @@ struct Instruction {
 }
 
 impl Instruction {
-    fn parse_parameter_mode(mode: char) -> Result<ParameterMode, &'static str> {
+    fn parse_parameter_mode(mode: i32) -> Result<ParameterMode, &'static str> {
         match mode {
-            '0' => Ok(ParameterMode::Position),
-            '1' => Ok(ParameterMode::Immediate),
+            0 => Ok(ParameterMode::Position),
+            1 => Ok(ParameterMode::Immediate),
             _ => Err("invalid parameter mode"),
         }
     }
 
-    fn parse_opcode(opcode: &str) -> Result<Opcode, &'static str> {
+    fn parse_opcode(opcode: i32) -> Result<Opcode, &'static str> {
         Ok(match opcode {
-            "01" => Opcode::Add,
-            "02" => Opcode::Multiply,
-            "03" => Opcode::Input,
-            "04" => Opcode::Output,
-            "05" => Opcode::JumpIfTrue,
-            "06" => Opcode::JumpIfFalse,
-            "07" => Opcode::LessThan,
-            "08" => Opcode::Equals,
-            "99" => Opcode::Halt,
+            1 => Opcode::Add,
+            2 => Opcode::Multiply,
+            3 => Opcode::Input,
+            4 => Opcode::Output,
+            5 => Opcode::JumpIfTrue,
+            6 => Opcode::JumpIfFalse,
+            7 => Opcode::LessThan,
+            8 => Opcode::Equals,
+            99 => Opcode::Halt,
             _ => return Err("invalid opcode"),
         })
     }
 
     fn parse(instr: i32) -> Result<Instruction, &'static str> {
-        let instr_str = format!("{:0>5}", instr);
-        let mut chars = instr_str.chars();
-        let p3_mode = Instruction::parse_parameter_mode(chars.next().unwrap())?;
-        let p2_mode = Instruction::parse_parameter_mode(chars.next().unwrap())?;
-        let p1_mode = Instruction::parse_parameter_mode(chars.next().unwrap())?;
-        let opcode = Instruction::parse_opcode(&chars.take(2).collect::<String>())?;
+        let p3_mode = Instruction::parse_parameter_mode((instr / 10000) % 10)?;
+        let p2_mode = Instruction::parse_parameter_mode((instr / 1000) % 10)?;
+        let p1_mode = Instruction::parse_parameter_mode((instr / 100) % 10)?;
+        let opcode = Instruction::parse_opcode(instr % 100)?;
 
         Ok(Instruction {
             opcode,
