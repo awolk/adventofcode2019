@@ -63,6 +63,22 @@ impl Instruction {
     }
 }
 
+#[derive(Clone)]
+pub struct Program {
+    memory: Vec<i32>,
+}
+
+impl Program {
+    pub fn new(code: &str) -> Option<Program> {
+        let memory = code
+            .split(',')
+            .map(|item| item.parse().ok())
+            .collect::<Option<Vec<i32>>>()?;
+
+        Some(Program { memory })
+    }
+}
+
 pub struct Emulator {
     memory: Vec<i32>,
     ip: i32,
@@ -75,33 +91,17 @@ pub struct Emulator {
 
 impl Emulator {
     pub fn new(
-        code: &str,
+        program: Program,
         input: Receiver<i32>,
         output: SyncSender<i32>,
     ) -> Result<Emulator, &'static str> {
-        let memory = code
-            .split(',')
-            .map(|item| item.parse().map_err(|_| "failed to parse integer"))
-            .collect::<Result<Vec<i32>, &'static str>>()?;
-
         Ok(Emulator {
-            memory,
+            memory: program.memory,
             ip: 0,
             halted: false,
             input: Some(input),
             output: Some(output),
         })
-    }
-
-    pub fn dup_memory(&self, input: Receiver<i32>, output: SyncSender<i32>) -> Emulator {
-        let memory = self.memory.clone();
-        Emulator {
-            memory,
-            ip: 0,
-            halted: false,
-            input: Some(input),
-            output: Some(output),
-        }
     }
 
     fn get(&self, address: i32) -> i32 {

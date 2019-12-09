@@ -1,32 +1,42 @@
+use crate::emulator::Program;
 use std::sync::mpsc::sync_channel;
 use std::thread::spawn;
 
 mod emulator;
 
 fn test_amps(
-    amp_control_software: &str,
+    amp_control_program: emulator::Program,
     phase_setting: [i32; 5],
     use_feedback_loop: bool,
 ) -> Result<i32, &'static str> {
-    let (in1tx, in1rx) = sync_channel(0);
-    let (out1tx, out1rx) = sync_channel(0);
-    let mut em1 = emulator::Emulator::new(amp_control_software, in1rx, out1tx)?;
+    let (send_in_to_1, recv_in_to_1) = sync_channel(0);
+    let (send_1_to_2, recv_1_to_2) = sync_channel(0);
+    let (send_2_to_3, recv_2_to_3) = sync_channel(0);
+    let (send_3_to_4, recv_3_to_4) = sync_channel(0);
+    let (send_4_to_5, recv_4_to_5) = sync_channel(0);
+    let (send_5_to_out, recv_5_to_out) = sync_channel(0);
 
-    let (in2tx, in2rx) = sync_channel(0);
-    let (out2tx, out2rx) = sync_channel(0);
-    let mut em2 = em1.dup_memory(in2rx, out2tx);
-
-    let (in3tx, in3rx) = sync_channel(0);
-    let (out3tx, out3rx) = sync_channel(0);
-    let mut em3 = em1.dup_memory(in3rx, out3tx);
-
-    let (in4tx, in4rx) = sync_channel(0);
-    let (out4tx, out4rx) = sync_channel(0);
-    let mut em4 = em1.dup_memory(in4rx, out4tx);
-
-    let (in5tx, in5rx) = sync_channel(0);
-    let (out5tx, out5rx) = sync_channel(0);
-    let mut em5 = em1.dup_memory(in5rx, out5tx);
+    let mut em1 = emulator::Emulator::new(
+        amp_control_program.clone(),
+        recv_in_to_1,
+        send_1_to_2.clone(),
+    )?;
+    let mut em2 = emulator::Emulator::new(
+        amp_control_program.clone(),
+        recv_1_to_2,
+        send_2_to_3.clone(),
+    )?;
+    let mut em3 = emulator::Emulator::new(
+        amp_control_program.clone(),
+        recv_2_to_3,
+        send_3_to_4.clone(),
+    )?;
+    let mut em4 = emulator::Emulator::new(
+        amp_control_program.clone(),
+        recv_3_to_4,
+        send_4_to_5.clone(),
+    )?;
+    let mut em5 = emulator::Emulator::new(amp_control_program, recv_4_to_5, send_5_to_out)?;
 
     // start amplifiers
     spawn(move || em1.run());
@@ -36,53 +46,36 @@ fn test_amps(
     spawn(move || em5.run());
 
     // send phase settings
-    in1tx.send(phase_setting[0]).map_err(|_| "send failed")?;
-    in2tx.send(phase_setting[1]).map_err(|_| "send failed")?;
-    in3tx.send(phase_setting[2]).map_err(|_| "send failed")?;
-    in4tx.send(phase_setting[3]).map_err(|_| "send failed")?;
-    in5tx.send(phase_setting[4]).map_err(|_| "send failed")?;
+    send_in_to_1
+        .send(phase_setting[0])
+        .map_err(|_| "send failed")?;
+    send_1_to_2
+        .send(phase_setting[1])
+        .map_err(|_| "send failed")?;
+    send_2_to_3
+        .send(phase_setting[2])
+        .map_err(|_| "send failed")?;
+    send_3_to_4
+        .send(phase_setting[3])
+        .map_err(|_| "send failed")?;
+    send_4_to_5
+        .send(phase_setting[4])
+        .map_err(|_| "send failed")?;
 
     // connect pipeline
     if !use_feedback_loop {
-        in1tx.send(0).map_err(|_| "send failed")?;
-        in2tx
-            .send(out1rx.recv().map_err(|_| "receive failed")?)
-            .map_err(|_| "send failed")?;
-        in3tx
-            .send(out2rx.recv().map_err(|_| "receive failed")?)
-            .map_err(|_| "send failed")?;
-        in4tx
-            .send(out3rx.recv().map_err(|_| "receive failed")?)
-            .map_err(|_| "send failed")?;
-        in5tx
-            .send(out4rx.recv().map_err(|_| "receive failed")?)
-            .map_err(|_| "send failed")?;
-
-        out5rx.recv().map_err(|_| "receive failed")
-    } else {
-        in1tx.send(0).map_err(|_| "send failed")?;
-        let mut last_output = 0; // placeholder
+        send_in_to_1.send(0).map_err(|_| "send failed")?;
 
         loop {
-            in2tx
-                .send(out1rx.recv().map_err(|_| "receive failed")?)
-                .map_err(|_| "send failed")?;
-            in3tx
-                .send(out2rx.recv().map_err(|_| "receive failed")?)
-                .map_err(|_| "send failed")?;
-            in4tx
-                .send(out3rx.recv().map_err(|_| "receive failed")?)
-                .map_err(|_| "send failed")?;
-            in5tx
-                .send(out4rx.recv().map_err(|_| "receive failed")?)
-                .map_err(|_| "send failed")?;
-
-            last_output = out5rx.recv().map_err(|_| "receive failed")?;
-            if let Err(_) = in1tx.send(last_output) {
+            let last_output = recv_5_to_out.recv().map_err(|_| "receive failed")?;
+            if send_in_to_1.send(last_output).is_err() {
                 // if error, the channel is closed and we have received the last output
                 return Ok(last_output);
             }
         }
+    } else {
+        send_in_to_1.send(0).map_err(|_| "send failed")?;
+        recv_5_to_out.recv().map_err(|_| "receive failed")
     }
 }
 
@@ -116,10 +109,10 @@ fn permutations5(values: [i32; 5]) -> impl Iterator<Item = [i32; 5]> {
     res.into_iter()
 }
 
-fn part1(amp_control_software: &str) {
+fn part1(amp_control_program: Program) {
     let best_output = permutations5([0, 1, 2, 3, 4])
         .map(|phase_setting| {
-            test_amps(amp_control_software, phase_setting, false).expect("failed test")
+            test_amps(amp_control_program.clone(), phase_setting, false).expect("failed test")
         })
         .max()
         .expect("failed to find max");
@@ -127,10 +120,10 @@ fn part1(amp_control_software: &str) {
     println!("Part 1: highest thruster signal = {}", best_output);
 }
 
-fn part2(amp_control_software: &str) {
+fn part2(amp_control_program: Program) {
     let best_output = permutations5([5, 6, 7, 8, 9])
         .map(|phase_setting| {
-            test_amps(amp_control_software, phase_setting, true).expect("failed test")
+            test_amps(amp_control_program.clone(), phase_setting, true).expect("failed test")
         })
         .max()
         .expect("failed to find max");
@@ -139,7 +132,8 @@ fn part2(amp_control_software: &str) {
 }
 
 fn main() {
-    let amp_control_software = include_str!("input.txt");
-    part1(amp_control_software);
-    part2(amp_control_software);
+    let amp_control_code = include_str!("input.txt");
+    let amp_control_program = Program::new(amp_control_code).expect("failed to parse program");
+    part1(amp_control_program.clone());
+    part2(amp_control_program);
 }
