@@ -68,8 +68,9 @@ pub struct Emulator {
     ip: i32,
     halted: bool,
 
-    input: Receiver<i32>,
-    output: SyncSender<i32>,
+    // use options to allow the channel half to be dropped
+    input: Option<Receiver<i32>>,
+    output: Option<SyncSender<i32>>,
 }
 
 impl Emulator {
@@ -87,8 +88,8 @@ impl Emulator {
             memory,
             ip: 0,
             halted: false,
-            input,
-            output,
+            input: Some(input),
+            output: Some(output),
         })
     }
 
@@ -98,8 +99,8 @@ impl Emulator {
             memory,
             ip: 0,
             halted: false,
-            input,
-            output,
+            input: Some(input),
+            output: Some(output),
         }
     }
 
@@ -139,14 +140,25 @@ impl Emulator {
                 self.ip += 4;
             }
             Opcode::Input => {
-                let input = self.input.recv().map_err(|_| "input failed")?;
+                // safe to unwrap because input will only be None when the emulator is halted
+                let input = self
+                    .input
+                    .as_ref()
+                    .unwrap()
+                    .recv()
+                    .map_err(|_| "input failed")?;
                 let res_addr = self.get(self.ip + 1);
                 self.store(res_addr, input);
                 self.ip += 2;
             }
             Opcode::Output => {
                 let arg = self.get_arg_val(1, instr.p1_mode);
-                self.output.send(arg).map_err(|_| "output failed")?;
+                // safe to unwrap because output will only be None when the emulator is halted
+                self.output
+                    .as_ref()
+                    .unwrap()
+                    .send(arg)
+                    .map_err(|_| "output failed")?;
                 self.ip += 2;
             }
             Opcode::JumpIfTrue => {
@@ -183,6 +195,9 @@ impl Emulator {
             }
             Opcode::Halt => {
                 self.halted = true;
+                // drop input and output channel halves
+                self.input = None;
+                self.output = None;
             }
         }
 
