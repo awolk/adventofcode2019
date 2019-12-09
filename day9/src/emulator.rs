@@ -241,7 +241,10 @@ impl Emulator {
         Ok(())
     }
 
-    pub fn run_program_with_input(program: Program, input: Vec<i64>) -> Result<(), &'static str> {
+    pub fn run_program_with_input(
+        program: Program,
+        input: Vec<i64>,
+    ) -> Result<Vec<i64>, &'static str> {
         let (in_send, in_recv) = sync_channel(input.len());
         let (out_send, out_recv) = sync_channel(0);
         let mut emu = Self::new(program, in_recv, out_send);
@@ -252,13 +255,13 @@ impl Emulator {
 
         let emu_thread = thread::spawn(move || emu.run());
 
-        for out in out_recv {
-            println!("Output: {}", out);
-        }
+        let output = out_recv.iter().collect();
 
         emu_thread
             .join()
             .map_err(|_| "failed to join emulator thread")
-            .and_then(|r| r)
+            .and_then(|r| r)?;
+
+        Ok(output)
     }
 }
