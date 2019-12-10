@@ -1,9 +1,73 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::f64::consts::{FRAC_PI_2, PI};
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
-#[derive(Eq, Clone)]
+//// Helpers:
+
+fn gcd(a: u64, b: u64) -> u64 {
+    // Euclid's algorithm
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a - b * (a / b))
+    }
+}
+
+// RationalAngle is a hashable, comparable angle derived from a vector
+#[derive(Clone)]
+struct RationalAngle {
+    x: i64,
+    y: i64,
+    angle: f64,
+}
+
+impl RationalAngle {
+    fn new(dx: i64, dy: i64) -> RationalAngle {
+        let gcd = gcd(dx.abs() as u64, dy.abs() as u64) as i64;
+        let x = dx / gcd;
+        let y = dy / gcd;
+
+        // order angle so straight up is first, going in order clockwise
+        // invert y because in in our system +y is down
+        let mut angle = FRAC_PI_2 - (-y as f64).atan2(x as f64);
+        if angle < 0. {
+            angle += 2. * PI;
+        }
+        RationalAngle { x, y, angle }
+    }
+}
+
+impl PartialEq for RationalAngle {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+impl Eq for RationalAngle {}
+
+impl Hash for RationalAngle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.x.hash(state);
+        self.y.hash(state);
+    }
+}
+
+impl Ord for RationalAngle {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.angle.partial_cmp(&other.angle).unwrap()
+    }
+}
+
+impl PartialOrd for RationalAngle {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// PosWithDist is a point struct sorted by an included distance value
+#[derive(Clone)]
 struct PosWithDist {
     x: usize,
     y: usize,
@@ -27,6 +91,10 @@ impl PartialEq for PosWithDist {
         self.dist == other.dist
     }
 }
+
+impl Eq for PosWithDist {}
+
+//// Implementation:
 
 struct Grid {
     map: Vec<Vec<bool>>,
@@ -67,9 +135,10 @@ impl Grid {
         for y in 0..height {
             for x in 0..width {
                 if (x, y) != (ax, ay) && self.map[y][x] {
-                    let angle = (ay as f64 - y as f64).atan2(x as f64 - ax as f64);
-                    let comparable_angle = (angle * 1_000_000.).round() as i64;
-                    angles.insert(comparable_angle);
+                    let dx = x as i64 - ax as i64;
+                    let dy = y as i64 - ay as i64;
+                    let angle = RationalAngle::new(dx, dy);
+                    angles.insert(angle);
                 }
             }
         }
@@ -92,30 +161,19 @@ impl Grid {
         let width = self.map[0].len();
 
         // we can see at most one asteroid per angle
-        let mut angles: BTreeMap<i64, BTreeSet<PosWithDist>> = BTreeMap::new();
+        let mut angles: BTreeMap<RationalAngle, BTreeSet<PosWithDist>> = BTreeMap::new();
         for y in 0..height {
             for x in 0..width {
                 if (x, y) != (ax, ay) && self.map[y][x] {
-                    let dy = ay as f64 - y as f64;
-                    let dx = x as f64 - ax as f64;
-
-                    let mut angle = -(dy.atan2(dx) - FRAC_PI_2);
-                    if angle < 0. {
-                        angle += 2. * PI;
-                    }
-                    let comparable_angle = (angle * 1_000_000.).round() as i64;
-
-                    let dist = dy.powi(2) + dx.powi(2);
-                    let comparable_dist = (dist * 1_000_000.).round() as usize;
+                    let dx = x as i64 - ax as i64;
+                    let dy = y as i64 - ay as i64;
+                    let angle = RationalAngle::new(dx, dy);
+                    let dist = (dy.pow(2) + dx.pow(2)) as usize;
 
                     angles
-                        .entry(comparable_angle)
+                        .entry(angle)
                         .or_insert_with(BTreeSet::new)
-                        .insert(PosWithDist {
-                            x,
-                            y,
-                            dist: comparable_dist,
-                        });
+                        .insert(PosWithDist { x, y, dist });
                 }
             }
         }
@@ -127,7 +185,7 @@ impl Grid {
                 let first = positions.iter().next().unwrap().clone();
                 positions.remove(&first);
                 if positions.is_empty() {
-                    to_remove.push(*angle);
+                    to_remove.push(angle.clone());
                 }
 
                 res.push((first.x, first.y));
