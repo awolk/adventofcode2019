@@ -105,12 +105,38 @@ impl Robot {
             self.pos = self.direction.move_along(self.pos);
         }
     }
+
+    fn display_grid(&self) {
+        let min_x = self.painted.keys().map(|&(x, _y)| x).min().unwrap();
+        let max_x = self.painted.keys().map(|&(x, _y)| x).max().unwrap();
+        let min_y = self.painted.keys().map(|&(_x, y)| y).min().unwrap();
+        let max_y = self.painted.keys().map(|&(_x, y)| y).max().unwrap();
+
+        for y in (min_y..=max_y).rev() {
+            for x in min_x..=max_x {
+                print!(
+                    "{}",
+                    match self.painted.get(&(x, y)).copied().unwrap_or(Color::Black) {
+                        Color::Black => ' ',
+                        Color::White => '#',
+                    }
+                );
+            }
+            println!();
+        }
+    }
 }
 
 fn main() {
     let input = include_str!("input.txt");
     let program = emulator::Program::new(input).expect("failed to parse input");
     let mut robot = Robot::new();
-    robot.run(program).expect("failed running program");
+    robot.run(program.clone()).expect("failed running program");
     println!("Part 1: result = {}", robot.painted.len());
+
+    let mut robot = Robot::new();
+    robot.painted.insert((0, 0), Color::White);
+    robot.run(program).expect("failed running program");
+    println!("Part 2:");
+    robot.display_grid();
 }
