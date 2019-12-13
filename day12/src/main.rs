@@ -1,98 +1,134 @@
-use std::iter::Sum;
-use std::ops::Add;
+use std::collections::HashSet;
 
-fn cmp(a: i64, b: i64) -> i64 {
-    if a < b {
-        -1
-    } else if a > b {
-        1
+fn gcd(a: usize, b: usize) -> usize {
+    // Euclid's algorithm
+    if b == 0 {
+        a
     } else {
-        0
+        gcd(b, a - b * (a / b))
     }
 }
 
-#[derive(Clone, Copy)]
-struct Vec3(i64, i64, i64);
-
-impl Vec3 {
-    fn abs_sum(&self) -> i64 {
-        self.0.abs() + self.1.abs() + self.2.abs()
-    }
-
-    fn cmp(&self, other: &Vec3) -> Vec3 {
-        Vec3(
-            cmp(self.0, other.0),
-            cmp(self.1, other.1),
-            cmp(self.2, other.2),
-        )
-    }
+fn lcm(a: usize, b: usize) -> usize {
+    a * b / gcd(a, b)
 }
 
-impl Add for Vec3 {
-    type Output = Vec3;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Vec3(self.0 + rhs.0, self.1 + rhs.1, self.2 + rhs.2)
-    }
+fn lcm3(a: usize, b: usize, c: usize) -> usize {
+    lcm(lcm(a, b), c)
 }
 
-impl Sum for Vec3 {
-    fn sum<I: Iterator<Item = Vec3>>(iter: I) -> Self {
-        iter.fold(Vec3(0, 0, 0), |acc, vec| acc + vec)
-    }
+#[derive(Hash, Eq, PartialEq, Clone)]
+struct Axis {
+    positions: [i64; 4],
+    velocities: [i64; 4],
 }
 
-struct Moon {
-    pos: Vec3,
-    vel: Vec3,
-}
-
-impl Moon {
-    fn new_at_rest(x: i64, y: i64, z: i64) -> Moon {
-        Moon {
-            pos: Vec3(x, y, z),
-            vel: Vec3(0, 0, 0),
+impl Axis {
+    fn step(&mut self) {
+        // apply gravity to accelerate
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                // apply gravity between points i and j
+                let diff = self.positions[i] - self.positions[j];
+                let diff = if diff == 0 { 0 } else { diff / diff.abs() }; // acceleration is either 1, -1, or 0
+                self.velocities[i] -= diff;
+                self.velocities[j] += diff;
+            }
+        }
+        // move moons
+        for i in 0..4 {
+            self.positions[i] += self.velocities[i];
         }
     }
 
-    fn potential_energy(&self) -> i64 {
-        self.pos.abs_sum()
+    fn find_cycle(&mut self) -> usize {
+        let mut states = HashSet::new();
+        states.insert(self.clone());
+        let mut step = 0;
+        loop {
+            step += 1;
+            self.step();
+            let is_new = states.insert(self.clone());
+            if !is_new {
+                return step;
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct System {
+    x_axis: Axis,
+    y_axis: Axis,
+    z_axis: Axis,
+}
+
+impl System {
+    fn step(&mut self) {
+        self.x_axis.step();
+        self.y_axis.step();
+        self.z_axis.step();
     }
 
-    fn kinetic_energy(&self) -> i64 {
-        self.vel.abs_sum()
+    fn moon_energy(&self, n: usize) -> i64 {
+        let (x, y, z) = (
+            self.x_axis.positions[n],
+            self.y_axis.positions[n],
+            self.z_axis.positions[n],
+        );
+        let (vx, vy, vz) = (
+            self.x_axis.velocities[n],
+            self.y_axis.velocities[n],
+            self.z_axis.velocities[n],
+        );
+        let potential_energy = x.abs() + y.abs() + z.abs();
+        let kinetic_energy = vx.abs() + vy.abs() + vz.abs();
+        potential_energy * kinetic_energy
     }
 
     fn total_energy(&self) -> i64 {
-        self.potential_energy() * self.kinetic_energy()
+        (0..4).map(|i| self.moon_energy(i)).sum()
     }
 
-    fn apply_gravity<'a>(&self, other_moons: impl Iterator<Item = &'a Moon>) -> Moon {
-        let acceleration = other_moons.map(|moon| moon.pos.cmp(&self.pos)).sum();
+    fn new(moons: [(i64, i64, i64); 4]) -> System {
+        let x_axis = Axis {
+            positions: [moons[0].0, moons[1].0, moons[2].0, moons[3].0],
+            velocities: [0; 4],
+        };
+        let y_axis = Axis {
+            positions: [moons[0].1, moons[1].1, moons[2].1, moons[3].1],
+            velocities: [0; 4],
+        };
+        let z_axis = Axis {
+            positions: [moons[0].2, moons[1].2, moons[2].2, moons[3].2],
+            velocities: [0; 4],
+        };
+        System {
+            x_axis,
+            y_axis,
+            z_axis,
+        }
+    }
 
-        let vel = self.vel + acceleration;
-        let pos = self.pos + vel;
-        Moon { pos, vel }
+    fn find_cycle(&mut self) -> usize {
+        let x_cycle = self.x_axis.find_cycle();
+        let y_cycle = self.y_axis.find_cycle();
+        let z_cycle = self.z_axis.find_cycle();
+
+        lcm3(x_cycle, y_cycle, z_cycle)
     }
 }
 
 fn main() {
-    let mut moons = vec![
-        Moon::new_at_rest(3, 3, 0),
-        Moon::new_at_rest(4, -16, 2),
-        Moon::new_at_rest(-10, -6, 5),
-        Moon::new_at_rest(-3, 0, -13),
-    ];
+    let mut system1 = System::new([(3, 3, 0), (4, -16, 2), (-10, -6, 5), (-3, 0, -13)]);
+    let mut system2 = system1.clone();
 
-    for i in 0..1000 {
-        let new_moons: Vec<Moon> = moons
-            .iter()
-            .map(|m| m.apply_gravity(moons.iter()))
-            .collect();
-        moons = new_moons;
+    // part 1
+    for _ in 0..1000 {
+        system1.step();
     }
+    println!("Part 1: total energy = {}", system1.total_energy());
 
-    let total_energy: i64 = moons.iter().map(|moon| moon.total_energy()).sum();
-
-    println!("Total energy: {}", total_energy);
+    // part 2
+    println!("Part 2: cycle length = {}", system2.find_cycle());
 }
