@@ -1,4 +1,8 @@
+#![allow(incomplete_features)]
+#![feature(const_generics)]
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+use std::mem::MaybeUninit;
 
 fn gcd(a: usize, b: usize) -> usize {
     // Euclid's algorithm
@@ -17,13 +21,30 @@ fn lcm3(a: usize, b: usize, c: usize) -> usize {
     lcm(lcm(a, b), c)
 }
 
-#[derive(Hash, Eq, PartialEq, Clone)]
-struct Axis {
-    positions: [i64; 4],
-    velocities: [i64; 4],
+#[derive(Clone)]
+struct Axis<const N: usize> {
+    positions: [i64; N],
+    velocities: [i64; N],
 }
 
-impl Axis {
+impl<const N: usize> PartialEq for Axis<{ N }> {
+    fn eq(&self, other: &Self) -> bool {
+        (0..N).all(|i| {
+            self.positions[i] == other.positions[i] && self.velocities[i] == other.velocities[i]
+        })
+    }
+}
+
+impl<const N: usize> Eq for Axis<{ N }> {}
+
+impl<const N: usize> Hash for Axis<{ N }> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.positions.hash(state);
+        self.velocities.hash(state);
+    }
+}
+
+impl<const N: usize> Axis<{ N }> {
     fn step(&mut self) {
         // apply gravity to accelerate
         for i in 0..4 {
@@ -57,13 +78,17 @@ impl Axis {
 }
 
 #[derive(Clone)]
-struct System {
-    x_axis: Axis,
-    y_axis: Axis,
-    z_axis: Axis,
+struct System<const N: usize> {
+    x_axis: Axis<{ N }>,
+    y_axis: Axis<{ N }>,
+    z_axis: Axis<{ N }>,
 }
 
-impl System {
+fn zeros<const N: usize>() -> [i64; N] {
+    unsafe { MaybeUninit::zeroed().assume_init() }
+}
+
+impl<const N: usize> System<{ N }> {
     fn step(&mut self) {
         self.x_axis.step();
         self.y_axis.step();
@@ -87,21 +112,22 @@ impl System {
     }
 
     fn total_energy(&self) -> i64 {
-        (0..4).map(|i| self.moon_energy(i)).sum()
+        (0..N).map(|i| self.moon_energy(i)).sum()
     }
 
-    fn new(moons: [(i64, i64, i64); 4]) -> System {
+    fn new(x: [i64; N], y: [i64; N], z: [i64; N]) -> Self {
         let x_axis = Axis {
-            positions: [moons[0].0, moons[1].0, moons[2].0, moons[3].0],
-            velocities: [0; 4],
+            positions: x,
+            //            velocities: zeros(),
+            velocities: zeros(),
         };
         let y_axis = Axis {
-            positions: [moons[0].1, moons[1].1, moons[2].1, moons[3].1],
-            velocities: [0; 4],
+            positions: y,
+            velocities: zeros(),
         };
         let z_axis = Axis {
-            positions: [moons[0].2, moons[1].2, moons[2].2, moons[3].2],
-            velocities: [0; 4],
+            positions: z,
+            velocities: zeros(),
         };
         System {
             x_axis,
@@ -120,15 +146,13 @@ impl System {
 }
 
 fn main() {
-    let mut system1 = System::new([(3, 3, 0), (4, -16, 2), (-10, -6, 5), (-3, 0, -13)]);
+    let mut system1: System<4> = System::new([3, 4, -10, -3], [3, -16, -6, 0], [0, 2, 5, -13]);
     let mut system2 = system1.clone();
 
-    // part 1
     for _ in 0..1000 {
         system1.step();
     }
     println!("Part 1: total energy = {}", system1.total_energy());
 
-    // part 2
     println!("Part 2: cycle length = {}", system2.find_cycle());
 }
