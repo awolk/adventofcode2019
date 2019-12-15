@@ -1,7 +1,4 @@
-use std::{
-    io::{self, Write},
-    iter,
-};
+use std::iter;
 
 enum ParameterMode {
     Position,
