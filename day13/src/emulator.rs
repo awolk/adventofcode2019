@@ -87,7 +87,6 @@ pub struct Emulator {
     memory: Vec<i64>,
     ip: i64,
     relative_base: i64,
-    halted: bool,
 }
 
 impl Emulator {
@@ -96,7 +95,6 @@ impl Emulator {
             memory: program.memory,
             ip: 0,
             relative_base: 0,
-            halted: false,
         }
     }
 
@@ -209,7 +207,6 @@ impl Emulator {
                 self.ip += 2;
             }
             Opcode::Halt => {
-                self.halted = true;
                 return Ok(true);
             }
         }
