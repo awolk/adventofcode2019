@@ -11,7 +11,7 @@ struct Item<'a> {
 
 impl<'a> Item<'a> {
     fn from_str(s: &'a str) -> Result<Self, String> {
-        let parts: Vec<_> = s.splitn(2, " ").collect();
+        let parts: Vec<_> = s.splitn(2, ' ').collect();
         let count = parts[0]
             .parse()
             .map_err(|err| format!("invalid count: {}", err))?;
@@ -50,7 +50,7 @@ fn parse_formulas(input: &str) -> Result<Vec<Formula>, String> {
 
 // Implementation
 
-fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> Result<u64, String> {
+fn min_ore_for_fuel(formulas: &[Formula], fuel_count: u64) -> Result<u64, String> {
     // build table of formulas and graph of ingredients
     let mut formula_for = HashMap::new();
     let mut ingredients = HashMap::new(); // forward edges
@@ -119,10 +119,10 @@ fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> Result<u64, Str
 
     needs
         .remove("ORE")
-        .ok_or("could not find final ORE count".to_string())
+        .ok_or_else(|| "could not find final ORE count".to_string())
 }
 
-fn max_fuel_for_ore(formulas: &Vec<Formula>, ore_count: u64) -> Result<u64, String> {
+fn max_fuel_for_ore(formulas: &[Formula], ore_count: u64) -> Result<u64, String> {
     let mut fuel_count_lower_bound = 0;
     let mut fuel_count_upper_bound = ore_count; // this is not necessarily true, but reasonable enough
 
@@ -156,6 +156,6 @@ fn main() {
     );
     println!(
         "Part 2: maximum FUEL for 1 trillion ORE = {}",
-        max_fuel_for_ore(&formulas, 1000000000000).expect("failed to find max fuel")
+        max_fuel_for_ore(&formulas, 1_000_000_000_000).expect("failed to find max fuel")
     )
 }
