@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 // Parsing
@@ -49,7 +50,7 @@ fn parse_formulas(input: &str) -> Result<Vec<Formula>, String> {
 
 // Implementation
 
-fn min_ore_for_fuel(formulas: &Vec<Formula>) -> u64 {
+fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> u64 {
     // build table of formulas and graph of ingredients
     let mut formula_for = HashMap::new();
     let mut ingredients = HashMap::new(); // forward edges
@@ -75,7 +76,7 @@ fn min_ore_for_fuel(formulas: &Vec<Formula>) -> u64 {
     // perform a topological sort on the ingredients graph, and process required ingredients as the
     // sort progresses
     let mut needs = HashMap::new();
-    needs.insert("FUEL", 1);
+    needs.insert("FUEL", fuel_count);
     let mut to_process = vec!["FUEL"];
 
     while !to_process.is_empty() {
@@ -112,11 +113,38 @@ fn min_ore_for_fuel(formulas: &Vec<Formula>) -> u64 {
     *needs.get("ORE").unwrap()
 }
 
+fn max_fuel_for_ore(formulas: &Vec<Formula>, ore_count: u64) -> u64 {
+    let mut fuel_count_lower_bound = 0;
+    let mut fuel_count_upper_bound = ore_count; // this is not necessarily true, but reasonable enough
+
+    // binary search
+    while fuel_count_lower_bound < fuel_count_upper_bound - 1 {
+        let attempt = (fuel_count_upper_bound + fuel_count_lower_bound) / 2;
+        let min_ore = min_ore_for_fuel(formulas, attempt);
+
+        match min_ore.cmp(&ore_count) {
+            Ordering::Less => fuel_count_lower_bound = attempt,
+            Ordering::Greater => fuel_count_upper_bound = attempt,
+            Ordering::Equal => return attempt,
+        }
+    }
+
+    if min_ore_for_fuel(formulas, fuel_count_upper_bound) <= ore_count {
+        fuel_count_upper_bound
+    } else {
+        fuel_count_lower_bound
+    }
+}
+
 fn main() {
     let input = include_str!("input.txt");
     let formulas = parse_formulas(input).expect("failed to parse formulas");
     println!(
-        "Part 1: minimum ORE for 1 FUEL = {:}",
-        min_ore_for_fuel(&formulas)
+        "Part 1: minimum ORE for 1 FUEL = {}",
+        min_ore_for_fuel(&formulas, 5)
     );
+    println!(
+        "Part 2: maximum FUEL for 1 trillion ORE = {}",
+        max_fuel_for_ore(&formulas, 1000000000000)
+    )
 }
