@@ -50,7 +50,7 @@ fn parse_formulas(input: &str) -> Result<Vec<Formula>, String> {
 
 // Implementation
 
-fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> u64 {
+fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> Result<u64, String> {
     // build table of formulas and graph of ingredients
     let mut formula_for = HashMap::new();
     let mut ingredients = HashMap::new(); // forward edges
@@ -87,7 +87,9 @@ fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> u64 {
 
         // handle current chemical
         if let Some(count) = needs.remove(processing) {
-            let formula = formula_for.get(processing).unwrap();
+            let formula = formula_for
+                .get(processing)
+                .ok_or_else(|| format!("could not find formula for {}", processing))?;
             let applications = (count as f64 / formula.output.count as f64).ceil() as u64;
             for input in &formula.inputs {
                 *needs.entry(input.name).or_insert(0) += applications * input.count;
@@ -95,9 +97,13 @@ fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> u64 {
         }
 
         // handle next steps of topological sort
-        let ingredients_of = ingredients.remove(processing).unwrap();
+        let ingredients_of = ingredients
+            .remove(processing)
+            .ok_or_else(|| format!("could not find ingredients of {}", processing))?;
         for ingredient in ingredients_of {
-            let ingredient_used_for = creates.get_mut(ingredient).unwrap();
+            let ingredient_used_for = creates
+                .get_mut(ingredient)
+                .ok_or_else(|| format!("could not find products of {}", ingredient))?;
             ingredient_used_for.remove(processing);
 
             if ingredient_used_for.is_empty() {
@@ -107,33 +113,38 @@ fn min_ore_for_fuel(formulas: &Vec<Formula>, fuel_count: u64) -> u64 {
         }
     }
     // validate that graph has no cycles
-    assert!(ingredients.is_empty());
-    assert!(creates.is_empty());
+    if !ingredients.is_empty() || !creates.is_empty() {
+        return Err("reaction graph is not acyclic".to_string());
+    }
 
-    *needs.get("ORE").unwrap()
+    needs
+        .remove("ORE")
+        .ok_or("could not find final ORE count".to_string())
 }
 
-fn max_fuel_for_ore(formulas: &Vec<Formula>, ore_count: u64) -> u64 {
+fn max_fuel_for_ore(formulas: &Vec<Formula>, ore_count: u64) -> Result<u64, String> {
     let mut fuel_count_lower_bound = 0;
     let mut fuel_count_upper_bound = ore_count; // this is not necessarily true, but reasonable enough
 
     // binary search
     while fuel_count_lower_bound < fuel_count_upper_bound - 1 {
         let attempt = (fuel_count_upper_bound + fuel_count_lower_bound) / 2;
-        let min_ore = min_ore_for_fuel(formulas, attempt);
+        let min_ore = min_ore_for_fuel(formulas, attempt)?;
 
         match min_ore.cmp(&ore_count) {
             Ordering::Less => fuel_count_lower_bound = attempt,
             Ordering::Greater => fuel_count_upper_bound = attempt,
-            Ordering::Equal => return attempt,
+            Ordering::Equal => return Ok(attempt),
         }
     }
 
-    if min_ore_for_fuel(formulas, fuel_count_upper_bound) <= ore_count {
-        fuel_count_upper_bound
-    } else {
-        fuel_count_lower_bound
-    }
+    Ok(
+        if min_ore_for_fuel(formulas, fuel_count_upper_bound)? <= ore_count {
+            fuel_count_upper_bound
+        } else {
+            fuel_count_lower_bound
+        },
+    )
 }
 
 fn main() {
@@ -141,10 +152,10 @@ fn main() {
     let formulas = parse_formulas(input).expect("failed to parse formulas");
     println!(
         "Part 1: minimum ORE for 1 FUEL = {}",
-        min_ore_for_fuel(&formulas, 5)
+        min_ore_for_fuel(&formulas, 5).expect("failed to find min ore")
     );
     println!(
         "Part 2: maximum FUEL for 1 trillion ORE = {}",
-        max_fuel_for_ore(&formulas, 1000000000000)
+        max_fuel_for_ore(&formulas, 1000000000000).expect("failed to find max fuel")
     )
 }
