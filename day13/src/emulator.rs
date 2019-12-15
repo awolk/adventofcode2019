@@ -1,7 +1,6 @@
 use std::{
+    io::{self, Write},
     iter,
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
-    thread,
 };
 
 enum ParameterMode {
@@ -92,21 +91,15 @@ pub struct Emulator {
     ip: i64,
     relative_base: i64,
     halted: bool,
-
-    // use options to allow the channel half to be dropped
-    input: Option<Receiver<i64>>,
-    output: Option<SyncSender<i64>>,
 }
 
 impl Emulator {
-    pub fn new(program: Program, input: Receiver<i64>, output: SyncSender<i64>) -> Emulator {
+    pub fn new(program: Program) -> Emulator {
         Emulator {
             memory: program.memory,
             ip: 0,
             relative_base: 0,
             halted: false,
-            input: Some(input),
-            output: Some(output),
         }
     }
 
@@ -119,7 +112,7 @@ impl Emulator {
         }
     }
 
-    fn store(&mut self, address: i64, value: i64) {
+    pub fn store(&mut self, address: i64, value: i64) {
         let address = address as usize;
         if address >= self.memory.len() {
             self.memory
@@ -146,7 +139,12 @@ impl Emulator {
         })
     }
 
-    fn step(&mut self) -> Result<(), &'static str> {
+    /// returns Ok(true) if halted
+    pub fn step(
+        &mut self,
+        get_input: impl FnOnce() -> Result<i64, &'static str>,
+        handle_output: impl FnOnce(i64) -> Result<(), &'static str>,
+    ) -> Result<bool, &'static str> {
         let instr_code = self.get(self.ip);
         let instr = Instruction::parse(instr_code)?;
 
@@ -166,25 +164,14 @@ impl Emulator {
                 self.ip += 4;
             }
             Opcode::Input => {
-                // safe to unwrap because input will only be None when the emulator is halted
-                let input = self
-                    .input
-                    .as_ref()
-                    .unwrap()
-                    .recv()
-                    .map_err(|_| "input failed")?;
+                let input = get_input()?;
                 let res_addr = self.get_arg_dest(1, instr.p1_mode)?;
                 self.store(res_addr, input);
                 self.ip += 2;
             }
             Opcode::Output => {
                 let arg = self.get_arg_val(1, instr.p1_mode);
-                // safe to unwrap because output will only be None when the emulator is halted
-                self.output
-                    .as_ref()
-                    .unwrap()
-                    .send(arg)
-                    .map_err(|_| "output failed")?;
+                handle_output(arg)?;
                 self.ip += 2;
             }
             Opcode::JumpIfTrue => {
@@ -226,44 +213,10 @@ impl Emulator {
             }
             Opcode::Halt => {
                 self.halted = true;
-                // drop input and output channel halves
-                self.input = None;
-                self.output = None;
+                return Ok(true);
             }
         }
 
-        Ok(())
-    }
-
-    pub fn run(&mut self) -> Result<(), &'static str> {
-        while !self.halted {
-            self.step()?
-        }
-
-        Ok(())
-    }
-
-    pub fn run_program_with_input(
-        program: Program,
-        input: impl ExactSizeIterator<Item = i64>,
-    ) -> Result<Vec<i64>, &'static str> {
-        let (in_send, in_recv) = sync_channel(input.len());
-        let (out_send, out_recv) = sync_channel(0);
-        let mut emu = Self::new(program, in_recv, out_send);
-
-        for i in input {
-            in_send.send(i).unwrap();
-        }
-
-        let emu_thread = thread::spawn(move || emu.run());
-
-        let output = out_recv.iter().collect();
-
-        emu_thread
-            .join()
-            .map_err(|_| "failed to join emulator thread")
-            .and_then(|r| r)?;
-
-        Ok(output)
+        Ok(false)
     }
 }
