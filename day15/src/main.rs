@@ -1,5 +1,6 @@
 mod emulator;
 
+use std::cmp::max;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
@@ -117,7 +118,8 @@ impl Maze {
         Maze(HashMap::new())
     }
 
-    fn shortest_path_to_oxygen(&self) -> usize {
+    // returns (pos, steps)
+    fn find_oxygen(&self) -> ((i64, i64), usize) {
         // breadth first search
         let mut seen: HashSet<(i64, i64)> = HashSet::new();
         let mut queue: VecDeque<((i64, i64), usize)> = VecDeque::new();
@@ -132,7 +134,7 @@ impl Maze {
             }
 
             match self.0.get(&(x, y)).unwrap() {
-                Tile::Oxygen => return steps,
+                Tile::Oxygen => return ((x, y), steps),
                 Tile::Wall => continue,
                 Tile::Empty => {}
             }
@@ -142,6 +144,37 @@ impl Maze {
                 queue.push_back(((x + dx, y + dy), steps + 1));
             }
         }
+    }
+
+    fn time_to_fill_oxygen_from(&self, pos: (i64, i64)) -> usize {
+        // exhaustive breadth first search from oxygen source
+        let mut seen: HashSet<(i64, i64)> = HashSet::new();
+        let mut queue: VecDeque<((i64, i64), usize)> = VecDeque::new();
+        queue.push_back((pos, 0));
+
+        let mut max_depth = 0;
+
+        while !queue.is_empty() {
+            let ((x, y), steps) = queue.pop_front().unwrap();
+
+            let is_new = seen.insert((x, y));
+            if !is_new {
+                continue;
+            }
+
+            if let Tile::Wall = self.0.get(&(x, y)).unwrap() {
+                continue;
+            }
+
+            max_depth = max(max_depth, steps);
+
+            for dir in DIRECTIONS.iter() {
+                let (dx, dy) = dir.to_delta();
+                queue.push_back(((x + dx, y + dy), steps + 1));
+            }
+        }
+
+        max_depth
     }
 }
 
@@ -186,9 +219,11 @@ fn main() {
 
     let mut robot = IntcodeRobot::new(program);
     let mut maze = Maze::new();
+
     explore_map(&mut robot, (0, 0), &mut maze).expect("failed to explore maze");
-    println!(
-        "Part 1: steps to solve maze = {}",
-        maze.shortest_path_to_oxygen()
-    );
+    let (oxygen_pos, length) = maze.find_oxygen();
+    println!("Part 1: steps to solve maze = {}", length);
+
+    let time_to_fill_oxygen = maze.time_to_fill_oxygen_from(oxygen_pos);
+    println!("Part 2: time to fill oxygen = {}", time_to_fill_oxygen);
 }
