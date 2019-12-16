@@ -1,6 +1,6 @@
 mod emulator;
 
-use crate::Status::{HitWall, Moved, MovedAndFinished};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
 
@@ -21,6 +21,15 @@ impl Movement {
             Movement::South => Movement::North,
             Movement::West => Movement::East,
             Movement::East => Movement::West,
+        }
+    }
+
+    fn to_delta(&self) -> (i64, i64) {
+        match self {
+            Movement::North => (0, 1),
+            Movement::South => (0, -1),
+            Movement::West => (-1, 0),
+            Movement::East => (1, 0),
         }
     }
 }
@@ -44,9 +53,9 @@ impl TryFrom<i64> for Status {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(match value {
-            0 => HitWall,
-            1 => Moved,
-            2 => MovedAndFinished,
+            0 => Status::HitWall,
+            1 => Status::Moved,
+            2 => Status::MovedAndFinished,
             _ => return Err("invalid status code"),
         })
     }
@@ -57,85 +66,82 @@ trait Robot {
     fn send_move(&mut self, movement: Movement) -> Result<Status, Self::Error>;
 }
 
-// maze solver
-fn do_moves<T: Robot>(robot: &mut T, moves: &[Movement]) -> Result<(i64, i64), &'static str> {
-    let mut x = 0;
-    let mut y = 0;
-    for m in moves {
-        match m {
-            Movement::North => y += 1,
-            Movement::South => y -= 1,
-            Movement::West => x -= 1,
-            Movement::East => x += 1,
-        }
+// maze exploration
 
-        let status = robot
-            .send_move(*m)
-            .map_err(|_| "move failed due to robot error")?;
-        if status != Status::Moved {
-            return Err("non-standard move");
-        }
-    }
-
-    Ok((x, y))
+enum Tile {
+    Empty,
+    Wall,
+    Oxygen,
 }
 
-fn reverse_moves<T: Robot>(robot: &mut T, moves: &[Movement]) -> Result<(), &'static str> {
-    for m in moves.iter().rev() {
-        let status = robot
-            .send_move(m.reverse())
-            .map_err(|_| "move failed due to robot error")?;
-        if status != Status::Moved {
-            return Err("non-standard move");
+struct Maze(HashMap<(i64, i64), Tile>);
+
+fn explore_map<T: Robot>(
+    robot: &mut T,
+    pos: (i64, i64),
+    maze: &mut Maze,
+) -> Result<(), &'static str> {
+    // depth first search
+    for dir in DIRECTIONS.iter() {
+        let (dx, dy) = dir.to_delta();
+        let new_pos = (pos.0 + dx, pos.1 + dy);
+        let entry = maze.0.entry(new_pos);
+        if let Entry::Vacant(ve) = entry {
+            // unexplored position
+            let status = robot.send_move(*dir).map_err(|_| "robot failed")?;
+            match status {
+                Status::HitWall => {
+                    ve.insert(Tile::Wall);
+                }
+                Status::Moved => {
+                    ve.insert(Tile::Empty);
+                    explore_map(robot, new_pos, maze);
+                    robot.send_move(dir.reverse()).map_err(|_| "robot failed")?;
+                }
+                Status::MovedAndFinished => {
+                    ve.insert(Tile::Oxygen);
+                    explore_map(robot, new_pos, maze);
+                    robot.send_move(dir.reverse()).map_err(|_| "robot failed")?;
+                }
+            }
         }
     }
 
     Ok(())
 }
 
-fn solve_maze<T: Robot>(robot: &mut T) -> Result<usize, &'static str> {
-    // bfs
-    let mut seen: HashSet<(i64, i64)> = HashSet::new();
-    let mut queue: VecDeque<Vec<Movement>> = VecDeque::new();
-    queue.push_back(Vec::new());
+// maze solving
 
-    loop {
-        let moves = queue.pop_front().unwrap();
-        let pos = do_moves(robot, &moves)?;
+impl Maze {
+    fn new() -> Self {
+        Maze(HashMap::new())
+    }
 
-        let is_new = seen.insert(pos);
-        if !is_new {
-            reverse_moves(robot, &moves)?;
-            continue;
-        }
+    fn shortest_path_to_oxygen(&self) -> usize {
+        // breadth first search
+        let mut seen: HashSet<(i64, i64)> = HashSet::new();
+        let mut queue: VecDeque<((i64, i64), usize)> = VecDeque::new();
+        queue.push_back(((0, 0), 0));
 
-        for attempt in DIRECTIONS.iter() {
-            // don't just undo the last move
-            if moves.len() > 0 && *attempt == moves.last().unwrap().reverse() {
+        loop {
+            let ((x, y), steps) = queue.pop_front().unwrap();
+
+            let is_new = seen.insert((x, y));
+            if !is_new {
                 continue;
             }
 
-            let status = robot
-                .send_move(*attempt)
-                .map_err(|_| "move failed due to robot error")?;
+            match self.0.get(&(x, y)).unwrap() {
+                Tile::Oxygen => return steps,
+                Tile::Wall => continue,
+                Tile::Empty => {}
+            }
 
-            match status {
-                Status::Moved => {
-                    let mut new_moves = moves.clone();
-                    new_moves.push(*attempt);
-                    queue.push_back(new_moves);
-
-                    robot
-                        .send_move(attempt.reverse())
-                        .map_err(|_| "move failed due to robot error")?;
-                }
-                Status::HitWall => {}
-                Status::MovedAndFinished => {
-                    return Ok(moves.len() + 1);
-                }
+            for dir in DIRECTIONS.iter() {
+                let (dx, dy) = dir.to_delta();
+                queue.push_back(((x + dx, y + dy), steps + 1));
             }
         }
-        reverse_moves(robot, &moves)?;
     }
 }
 
@@ -177,7 +183,12 @@ impl Robot for IntcodeRobot {
 fn main() {
     let input = include_str!("input.txt");
     let program = emulator::Program::new(input).expect("failed to parse program");
+
     let mut robot = IntcodeRobot::new(program);
-    let steps = solve_maze(&mut robot).expect("failed to solve maze");
-    println!("Part 1: steps to solve maze = {}", steps);
+    let mut maze = Maze::new();
+    explore_map(&mut robot, (0, 0), &mut maze).expect("failed to explore maze");
+    println!(
+        "Part 1: steps to solve maze = {}",
+        maze.shortest_path_to_oxygen()
+    );
 }
