@@ -1,9 +1,10 @@
 mod emulator;
 
-use std::cmp::max;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::convert::{TryFrom, TryInto};
+use std::{
+    cmp::max,
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    convert::{TryFrom, TryInto},
+};
 
 // interface for robot in maze
 
@@ -16,7 +17,7 @@ enum Movement {
 }
 
 impl Movement {
-    fn reverse(&self) -> Self {
+    fn reverse(self) -> Self {
         match self {
             Movement::North => Movement::South,
             Movement::South => Movement::North,
@@ -25,7 +26,7 @@ impl Movement {
         }
     }
 
-    fn to_delta(&self) -> (i64, i64) {
+    fn to_delta(self) -> (i64, i64) {
         match self {
             Movement::North => (0, 1),
             Movement::South => (0, -1),
@@ -96,12 +97,12 @@ fn explore_map<T: Robot>(
                 }
                 Status::Moved => {
                     ve.insert(Tile::Empty);
-                    explore_map(robot, new_pos, maze);
+                    explore_map(robot, new_pos, maze)?;
                     robot.send_move(dir.reverse()).map_err(|_| "robot failed")?;
                 }
                 Status::MovedAndFinished => {
                     ve.insert(Tile::Oxygen);
-                    explore_map(robot, new_pos, maze);
+                    explore_map(robot, new_pos, maze)?;
                     robot.send_move(dir.reverse()).map_err(|_| "robot failed")?;
                 }
             }
@@ -118,23 +119,23 @@ impl Maze {
         Maze(HashMap::new())
     }
 
-    // returns (pos, steps)
-    fn find_oxygen(&self) -> ((i64, i64), usize) {
-        // breadth first search
+    // returns Ok((pos, steps)) if successful
+    fn find_oxygen(&self) -> Result<((i64, i64), usize), &'static str> {
+        // breadth first search for Oxygen
         let mut seen: HashSet<(i64, i64)> = HashSet::new();
         let mut queue: VecDeque<((i64, i64), usize)> = VecDeque::new();
         queue.push_back(((0, 0), 0));
 
         loop {
-            let ((x, y), steps) = queue.pop_front().unwrap();
+            let ((x, y), steps) = queue.pop_front().ok_or("BFS failed")?;
 
             let is_new = seen.insert((x, y));
             if !is_new {
                 continue;
             }
 
-            match self.0.get(&(x, y)).unwrap() {
-                Tile::Oxygen => return ((x, y), steps),
+            match self.0.get(&(x, y)).ok_or("unbounded map")? {
+                Tile::Oxygen => return Ok(((x, y), steps)),
                 Tile::Wall => continue,
                 Tile::Empty => {}
             }
@@ -146,7 +147,7 @@ impl Maze {
         }
     }
 
-    fn time_to_fill_oxygen_from(&self, pos: (i64, i64)) -> usize {
+    fn time_to_fill_oxygen_from(&self, pos: (i64, i64)) -> Result<usize, &'static str> {
         // exhaustive breadth first search from oxygen source
         let mut seen: HashSet<(i64, i64)> = HashSet::new();
         let mut queue: VecDeque<((i64, i64), usize)> = VecDeque::new();
@@ -162,7 +163,7 @@ impl Maze {
                 continue;
             }
 
-            if let Tile::Wall = self.0.get(&(x, y)).unwrap() {
+            if let Tile::Wall = self.0.get(&(x, y)).ok_or("unbounded map")? {
                 continue;
             }
 
@@ -174,7 +175,7 @@ impl Maze {
             }
         }
 
-        max_depth
+        Ok(max_depth)
     }
 }
 
@@ -221,9 +222,11 @@ fn main() {
     let mut maze = Maze::new();
 
     explore_map(&mut robot, (0, 0), &mut maze).expect("failed to explore maze");
-    let (oxygen_pos, length) = maze.find_oxygen();
+    let (oxygen_pos, length) = maze.find_oxygen().expect("failed to find oxygen");
     println!("Part 1: steps to solve maze = {}", length);
 
-    let time_to_fill_oxygen = maze.time_to_fill_oxygen_from(oxygen_pos);
+    let time_to_fill_oxygen = maze
+        .time_to_fill_oxygen_from(oxygen_pos)
+        .expect("failed to find time for oxygen fill");
     println!("Part 2: time to fill oxygen = {}", time_to_fill_oxygen);
 }
