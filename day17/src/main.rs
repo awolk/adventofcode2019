@@ -68,40 +68,34 @@ fn get_image(emu: &mut emulator::Emulator) -> Result<Image, &'static str> {
     let mut vacuum_col = 0;
     let mut vacuum_dir = Direction::Left;
 
-    loop {
-        let halted = emu.step(
-            || Err("no input"),
-            |i| {
-                match (i as u8) as char {
-                    '.' => row.push(false),
-                    '#' => row.push(true),
-                    '^' | 'v' | '<' | '>' => {
-                        vacuum_col = row.len();
-                        vacuum_row = map.len();
-                        vacuum_dir = match (i as u8) as char {
-                            '^' => Direction::Up,
-                            'v' => Direction::Down,
-                            '<' => Direction::Left,
-                            '>' => Direction::Right,
-                            _ => unreachable!(),
-                        };
-                        row.push(true);
-                    }
-                    '\n' => {
-                        if row.len() > 0 {
-                            map.push(std::mem::replace(&mut *row, Vec::new()));
-                        }
-                    }
-                    _ => return Err("invalid pixel"),
+    while !emu.step(
+        || Err("no input"),
+        |i| {
+            match (i as u8) as char {
+                '.' => row.push(false),
+                '#' => row.push(true),
+                '^' | 'v' | '<' | '>' => {
+                    vacuum_col = row.len();
+                    vacuum_row = map.len();
+                    vacuum_dir = match (i as u8) as char {
+                        '^' => Direction::Up,
+                        'v' => Direction::Down,
+                        '<' => Direction::Left,
+                        '>' => Direction::Right,
+                        _ => unreachable!(),
+                    };
+                    row.push(true);
                 }
-                Ok(())
-            },
-        )?;
-
-        if halted {
-            break;
-        }
-    }
+                '\n' => {
+                    if row.len() > 0 {
+                        map.push(std::mem::replace(&mut *row, Vec::new()));
+                    }
+                }
+                _ => return Err("invalid pixel"),
+            }
+            Ok(())
+        },
+    )? {}
 
     Ok(Image {
         map,
@@ -111,18 +105,18 @@ fn get_image(emu: &mut emulator::Emulator) -> Result<Image, &'static str> {
     })
 }
 
-fn sum_intersection_alignment_params(map: &[Vec<bool>]) -> usize {
+fn sum_intersection_alignment_params(image: &Image) -> usize {
     let mut res = 0;
 
-    let height = map.len();
-    let width = map[0].len();
+    let height = image.map.len();
+    let width = image.map[0].len();
     for row in 1..height - 1 {
         for col in 1..width - 1 {
-            if map[row][col]
-                && map[row - 1][col]
-                && map[row + 1][col]
-                && map[row][col - 1]
-                && map[row][col + 1]
+            if image.map[row][col]
+                && image.map[row - 1][col]
+                && image.map[row + 1][col]
+                && image.map[row][col - 1]
+                && image.map[row][col + 1]
             {
                 res += row * col;
             }
@@ -189,7 +183,8 @@ fn steps_foward(image: &Image, dir: Direction, mut row: i64, mut col: i64) -> (u
     }
 }
 
-fn find_path(image: &Image) -> Vec<Instruction> {
+// note that find_path does not check if every scaffold is traversed
+fn find_path(image: &Image) -> Option<Vec<Instruction>> {
     let mut res = Vec::new();
     // find initial rotation:
     let (initial_rot, mut dir) = find_rotation(
@@ -199,7 +194,7 @@ fn find_path(image: &Image) -> Vec<Instruction> {
         image.vacuum_col as i64,
     );
 
-    res.push(initial_rot.expect("failed to find initial rotation"));
+    res.push(initial_rot?);
 
     // move forward then rotate until done
     let mut row = image.vacuum_row as i64;
@@ -213,7 +208,7 @@ fn find_path(image: &Image) -> Vec<Instruction> {
         let (rot, new_dir) = find_rotation(image, dir, row, col);
         match rot {
             Some(i) => res.push(i),
-            None => return res,
+            None => return Some(res),
         }
         dir = new_dir;
     }
@@ -254,7 +249,8 @@ fn compress_path(path: &[Instruction], max_chars: usize) -> Option<PathProgram> 
     for a_start in 0..path.len() {
         for a_end in a_start + 1..=path.len() {
             let a = &path[a_start..a_end];
-            if str_len(a) > max_chars {
+            let a_str = to_ascii(a);
+            if a.len() > max_chars {
                 break;
             }
 
@@ -264,11 +260,12 @@ fn compress_path(path: &[Instruction], max_chars: usize) -> Option<PathProgram> 
                 let chunk = remaining_chunks[chunk_i];
                 let prev_chunks = &remaining_chunks[..chunk_i];
                 let later_chunks = &remaining_chunks[chunk_i + 1..];
+
                 for b_start in 0..chunk.len() {
                     for b_end in b_start + 1..=chunk.len() {
                         let b = &chunk[b_start..b_end];
-
-                        if str_len(b) > max_chars {
+                        let b_str = to_ascii(b);
+                        if b_str.len() > max_chars {
                             break;
                         }
 
@@ -282,8 +279,8 @@ fn compress_path(path: &[Instruction], max_chars: usize) -> Option<PathProgram> 
                         for c_start in 0..first_remaining.len() {
                             for c_end in c_start + 1..=first_remaining.len() {
                                 let c = &first_remaining[c_start..c_end];
-
-                                if str_len(c) > max_chars {
+                                let c_str = to_ascii(c);
+                                if c_str.len() > max_chars {
                                     break;
                                 }
 
@@ -291,12 +288,7 @@ fn compress_path(path: &[Instruction], max_chars: usize) -> Option<PathProgram> 
                                     .iter()
                                     .all(|chunk| split(chunk, c).is_empty())
                                 {
-                                    let main_str = to_ascii(path);
-                                    let a_str = to_ascii(a);
-                                    let b_str = to_ascii(b);
-                                    let c_str = to_ascii(c);
-
-                                    let main_str = main_str
+                                    let main_str = to_ascii(path)
                                         .replace(&a_str, "A")
                                         .replace(&b_str, "B")
                                         .replace(&c_str, "C");
@@ -326,10 +318,6 @@ fn to_ascii<T: ToString>(path: &[T]) -> String {
         .map(|i| i.to_string())
         .collect::<Vec<String>>()
         .join(",")
-}
-
-fn str_len<T: ToString>(path: &[T]) -> usize {
-    to_ascii(path).len()
 }
 
 fn exec_path_program(
@@ -362,13 +350,13 @@ fn main() {
     // part 1
     let mut emu = emulator::Emulator::new(program.clone());
     let image = get_image(&mut emu).expect("failed to get image");
-    let sum = sum_intersection_alignment_params(&image.map);
+    let sum = sum_intersection_alignment_params(&image);
     println!("Part 1: sum of alignment params = {}", sum);
 
     // part 2
     let mut emu = emulator::Emulator::new(program);
     emu.store(0, 2);
-    let path = find_path(&image);
+    let path = find_path(&image).expect("failed to find path");
     let path_program = compress_path(&path, 20).expect("failed to compress path");
     let dust_collected =
         exec_path_program(&mut emu, path_program).expect("failed to count dust collected");
