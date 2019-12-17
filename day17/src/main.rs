@@ -246,64 +246,51 @@ fn split<'a, T: PartialEq>(mut path: &'a [T], delim: &[T]) -> Vec<&'a [T]> {
 }
 
 fn compress_path(path: &[Instruction], max_chars: usize) -> Option<PathProgram> {
-    for a_start in 0..path.len() {
-        for a_end in a_start + 1..=path.len() {
-            let a = &path[a_start..a_end];
-            let a_str = to_ascii(a);
-            if a.len() > max_chars {
+    for a_end in 1..=path.len() {
+        let a = &path[..a_end];
+        let a_str = to_ascii(a);
+        if a.len() > max_chars {
+            break;
+        }
+
+        let remaining_chunks = split(path, a);
+        let first_chunk = remaining_chunks[0];
+        let other_chunks = &remaining_chunks[1..];
+
+        for b_end in 1..=first_chunk.len() {
+            let b = &first_chunk[..b_end];
+            let b_str = to_ascii(b);
+            if b_str.len() > max_chars {
                 break;
             }
 
-            let remaining_chunks = split(path, a);
+            let mut remaining_chunks = split(first_chunk, b);
+            remaining_chunks.extend(other_chunks.iter().flat_map(|chunk| split(chunk, b)));
+            let first_chunk = remaining_chunks[0];
 
-            for chunk_i in 0..remaining_chunks.len() {
-                let chunk = remaining_chunks[chunk_i];
-                let prev_chunks = &remaining_chunks[..chunk_i];
-                let later_chunks = &remaining_chunks[chunk_i + 1..];
+            for c_end in 1..=first_chunk.len() {
+                let c = &first_chunk[..c_end];
+                let c_str = to_ascii(c);
+                if c_str.len() > max_chars {
+                    break;
+                }
 
-                for b_start in 0..chunk.len() {
-                    for b_end in b_start + 1..=chunk.len() {
-                        let b = &chunk[b_start..b_end];
-                        let b_str = to_ascii(b);
-                        if b_str.len() > max_chars {
-                            break;
-                        }
+                if remaining_chunks
+                    .iter()
+                    .all(|chunk| split(chunk, c).is_empty())
+                {
+                    let main_str = to_ascii(path)
+                        .replace(&a_str, "A")
+                        .replace(&b_str, "B")
+                        .replace(&c_str, "C");
 
-                        let mut remaining_chunks = split(chunk, b);
-                        remaining_chunks
-                            .extend(prev_chunks.iter().flat_map(|chunk| split(chunk, b)));
-                        remaining_chunks
-                            .extend(later_chunks.iter().flat_map(|chunk| split(chunk, b)));
-
-                        let first_remaining = remaining_chunks[0];
-                        for c_start in 0..first_remaining.len() {
-                            for c_end in c_start + 1..=first_remaining.len() {
-                                let c = &first_remaining[c_start..c_end];
-                                let c_str = to_ascii(c);
-                                if c_str.len() > max_chars {
-                                    break;
-                                }
-
-                                if remaining_chunks
-                                    .iter()
-                                    .all(|chunk| split(chunk, c).is_empty())
-                                {
-                                    let main_str = to_ascii(path)
-                                        .replace(&a_str, "A")
-                                        .replace(&b_str, "B")
-                                        .replace(&c_str, "C");
-
-                                    if main_str.len() <= max_chars {
-                                        return Some(PathProgram {
-                                            main: main_str,
-                                            a: a_str,
-                                            b: b_str,
-                                            c: c_str,
-                                        });
-                                    }
-                                }
-                            }
-                        }
+                    if main_str.len() <= max_chars {
+                        return Some(PathProgram {
+                            main: main_str,
+                            a: a_str,
+                            b: b_str,
+                            c: c_str,
+                        });
                     }
                 }
             }
