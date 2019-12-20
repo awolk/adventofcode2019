@@ -6,13 +6,15 @@ enum Item {
     Entrance,
     Passage,
     Wall,
-    Key(char),
-    Door(char),
+    Key(u8),
+    Door(u8),
 }
 
 struct Maze {
     map: HashMap<(usize, usize), Item>,
     entrances: Vec<(usize, usize)>,
+    keys: HashMap<u8, (usize, usize)>,
+    doors: HashMap<u8, (usize, usize)>,
 }
 
 impl Maze {
@@ -41,26 +43,38 @@ impl Maze {
 fn parse_input(input: &str) -> Maze {
     let mut entrances = Vec::new();
     let mut map = HashMap::new();
+    let mut keys = HashMap::new();
+    let mut doors = HashMap::new();
     for (row, line) in input.lines().enumerate() {
-        for (col, chr) in line.chars().enumerate() {
+        for (col, chr) in line.bytes().enumerate() {
             let item = match chr {
-                '@' => Item::Entrance,
-                '.' => Item::Passage,
-                '#' => Item::Wall,
-                'a'..='z' => Item::Key(chr),
-                'A'..='Z' => Item::Door(chr.to_ascii_lowercase()),
+                b'@' => {
+                    entrances.push((row, col));
+                    Item::Entrance
+                }
+                b'.' => Item::Passage,
+                b'#' => Item::Wall,
+                b'a'..=b'z' => {
+                    keys.insert(chr, (row, col));
+                    Item::Key(chr)
+                }
+                b'A'..=b'Z' => {
+                    doors.insert(chr.to_ascii_lowercase(), (row, col));
+                    Item::Door(chr.to_ascii_lowercase())
+                }
                 _ => panic!("invalid entry"),
             };
-
-            if item == Item::Entrance {
-                entrances.push((row, col));
-            }
 
             map.insert((row, col), item);
         }
     }
 
-    Maze { map, entrances }
+    Maze {
+        map,
+        entrances,
+        keys,
+        doors,
+    }
 }
 
 pub trait Node: Sized {
@@ -137,19 +151,19 @@ impl<'a> State<'a> {
         }
     }
 
-    fn with_pos_and_key(&self, robot: usize, position: (usize, usize), key: char) -> Self {
+    fn with_pos_and_key(&self, robot: usize, position: (usize, usize), key: u8) -> Self {
         let mut positions = self.positions.clone();
         positions[robot] = position;
         Self {
             positions,
-            inventory: self.inventory | (1 << (key as u8 - b'a') as u32),
+            inventory: self.inventory | (1 << (key - b'a') as u32),
             steps: self.steps + 1,
             maze: self.maze,
         }
     }
 
-    fn has_key(&self, key: char) -> bool {
-        (self.inventory & (1 << (key as u8 - b'a') as u32)) != 0
+    fn has_key(&self, key: u8) -> bool {
+        (self.inventory & (1 << (key - b'a') as u32)) != 0
     }
 
     fn is_final(&self) -> bool {
