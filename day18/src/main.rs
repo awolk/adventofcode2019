@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Clone)]
 enum Item {
@@ -14,7 +16,6 @@ struct Maze {
     map: HashMap<(usize, usize), Item>,
     entrances: Vec<(usize, usize)>,
     keys: HashMap<u8, (usize, usize)>,
-    doors: HashMap<u8, (usize, usize)>,
 }
 
 impl Maze {
@@ -44,7 +45,6 @@ fn parse_input(input: &str) -> Maze {
     let mut entrances = Vec::new();
     let mut map = HashMap::new();
     let mut keys = HashMap::new();
-    let mut doors = HashMap::new();
     for (row, line) in input.lines().enumerate() {
         for (col, chr) in line.bytes().enumerate() {
             let item = match chr {
@@ -58,10 +58,7 @@ fn parse_input(input: &str) -> Maze {
                     keys.insert(chr, (row, col));
                     Item::Key(chr)
                 }
-                b'A'..=b'Z' => {
-                    doors.insert(chr.to_ascii_lowercase(), (row, col));
-                    Item::Door(chr.to_ascii_lowercase())
-                }
+                b'A'..=b'Z' => Item::Door(chr.to_ascii_lowercase()),
                 _ => panic!("invalid entry"),
             };
 
@@ -73,7 +70,6 @@ fn parse_input(input: &str) -> Maze {
         map,
         entrances,
         keys,
-        doors,
     }
 }
 
@@ -81,25 +77,22 @@ pub trait Node: Sized {
     fn neighbors(&self) -> Vec<Self>;
 }
 
-fn breadth_first_search<T: Node + Eq + Hash>(
-    start: T,
-    mut done: impl FnMut(&T) -> bool,
-) -> Option<T> {
-    let mut queue = VecDeque::new();
+fn dijkstra<T: Node + Eq + Hash + Ord>(start: T, mut done: impl FnMut(&T) -> bool) -> Option<T> {
+    let mut queue = BinaryHeap::new();
     let mut seen = HashSet::new();
-    queue.push_back(start);
+    queue.push(start);
 
-    while let Some(node) = queue.pop_front() {
+    while let Some(node) = queue.pop() {
         if seen.contains(&node) {
             continue;
         }
 
-        for neighbor in node.neighbors() {
-            if done(&neighbor) {
-                return Some(neighbor);
-            }
+        if done(&node) {
+            return Some(node);
+        }
 
-            queue.push_back(neighbor);
+        for neighbor in node.neighbors() {
+            queue.push(neighbor);
         }
 
         seen.insert(node);
@@ -108,6 +101,7 @@ fn breadth_first_search<T: Node + Eq + Hash>(
     None
 }
 
+#[derive(Clone)]
 struct State<'a> {
     positions: Vec<(usize, usize)>,
     inventory: u32,
@@ -120,13 +114,22 @@ impl<'a> PartialEq for State<'a> {
         self.positions == other.positions && self.inventory == other.inventory
     }
 }
-
 impl<'a> Eq for State<'a> {}
-
 impl<'a> Hash for State<'a> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.positions.hash(state);
         self.inventory.hash(state);
+    }
+}
+impl<'a> PartialOrd for State<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // reverse order so that BinaryHeap behaves as a min-heap
+        Some(other.steps.cmp(&self.steps))
+    }
+}
+impl<'a> Ord for State<'a> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
     }
 }
 
@@ -140,24 +143,13 @@ impl<'a> State<'a> {
         }
     }
 
-    fn with_pos(&self, robot: usize, position: (usize, usize)) -> Self {
+    fn with_key(&self, robot: usize, key: u8, dist: usize) -> Self {
         let mut positions = self.positions.clone();
-        positions[robot] = position;
-        Self {
-            positions,
-            inventory: self.inventory,
-            steps: self.steps + 1,
-            maze: self.maze,
-        }
-    }
-
-    fn with_pos_and_key(&self, robot: usize, position: (usize, usize), key: u8) -> Self {
-        let mut positions = self.positions.clone();
-        positions[robot] = position;
+        positions[robot] = self.maze.keys[&key];
         Self {
             positions,
             inventory: self.inventory | (1 << (key - b'a') as u32),
-            steps: self.steps + 1,
+            steps: self.steps + dist,
             maze: self.maze,
         }
     }
@@ -169,44 +161,78 @@ impl<'a> State<'a> {
     fn is_final(&self) -> bool {
         self.inventory == 0b11_1111_1111_1111_1111_1111_1111
     }
+
+    fn find_reachable_from_pos(&self, pos: (usize, usize)) -> HashMap<u8, usize> {
+        let mut res: HashMap<u8, usize> = HashMap::new();
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let mut queue: VecDeque<((usize, usize), usize)> = VecDeque::new();
+        queue.push_back((pos, 0));
+        while let Some((pos, dist)) = queue.pop_front() {
+            if seen.contains(&pos) {
+                continue;
+            }
+            seen.insert(pos);
+
+            let item = self.maze.map.get(&pos).unwrap_or(&Item::Wall);
+            match item {
+                Item::Wall => continue,
+                Item::Door(key) if !self.has_key(*key) => continue,
+                Item::Key(key) if !self.has_key(*key) => {
+                    res.entry(*key).or_insert(dist);
+                }
+                _ => {}
+            }
+
+            let (r, c) = pos;
+            for neighbor in &[(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)] {
+                queue.push_back((*neighbor, dist + 1));
+            }
+        }
+
+        res
+    }
 }
 
 impl<'a> Node for State<'a> {
     fn neighbors(&self) -> Vec<Self> {
-        let mut neighbors = Vec::with_capacity(4);
-        for (robot, &(r, c)) in self.positions.iter().enumerate() {
-            for &(pr, pc) in &[(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)] {
-                let item = self.maze.map.get(&(pr, pc)).unwrap_or(&Item::Wall);
-                let can_move_to = match item {
-                    Item::Wall => false,
-                    Item::Door(chr) => self.has_key(*chr),
-                    _ => true,
-                };
-
-                if can_move_to {
-                    neighbors.push(if let Item::Key(chr) = item {
-                        self.with_pos_and_key(robot, (pr, pc), *chr)
-                    } else {
-                        self.with_pos(robot, (pr, pc))
-                    });
-                }
+        let mut neighbors = Vec::new();
+        for (robot, pos) in self.positions.iter().enumerate() {
+            let reachable_keys = self.find_reachable_from_pos(*pos);
+            for (key, dist) in reachable_keys.into_iter() {
+                neighbors.push(self.with_key(robot, key, dist));
             }
         }
         neighbors
     }
 }
 
+fn time<T>(func: impl FnOnce() -> T) -> (Duration, T) {
+    let start = Instant::now();
+    let res = func();
+    let duration = start.elapsed();
+    (duration, res)
+}
+
 fn main() {
     let input = include_str!("input.txt");
     let mut maze = parse_input(input);
+
     let start_state = State::new(&maze);
-    let final_state =
-        breadth_first_search(start_state, State::is_final).expect("failed to find result");
-    println!("Part 1: steps = {}", final_state.steps);
+    let (duration, final_state) =
+        time(|| dijkstra(start_state, State::is_final).expect("failed to find result"));
+    println!(
+        "Part 1: steps = {} in {}s",
+        final_state.steps,
+        duration.as_secs()
+    );
 
     maze.convert_entrance();
     let start_state = State::new(&maze);
-    let final_state =
-        breadth_first_search(start_state, State::is_final).expect("failed to find result");
-    println!("Part 2: steps = {}", final_state.steps);
+    let (duration, final_state) =
+        time(|| dijkstra(start_state, State::is_final).expect("failed to find result"));
+    println!(
+        "Part 2: steps = {} in {}s",
+        final_state.steps,
+        duration.as_secs()
+    );
 }
