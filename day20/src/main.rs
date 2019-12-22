@@ -1,6 +1,7 @@
 mod vector;
 use self::vector::Vec2;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 
 #[derive(Eq, PartialEq)]
 enum Entry {
@@ -20,8 +21,10 @@ struct Maze {
     portal_dests: HashMap<(u8, u8), Vec<Vec2>>,
 }
 
-impl From<&str> for Maze {
-    fn from(input: &str) -> Self {
+impl TryFrom<&str> for Maze {
+    type Error = String;
+
+    fn try_from(input: &str) -> Result<Self, Self::Error> {
         let byte_grid: HashMap<Vec2, u8> = input
             .lines()
             .enumerate()
@@ -68,7 +71,9 @@ impl From<&str> for Maze {
                                 let below_under_pos = under_pos + Vec2(1, 0);
                                 let below_under_val =
                                     *byte_grid.get(&below_under_pos).unwrap_or(&b'#');
-                                assert_eq!(below_under_val, b'.');
+                                if below_under_val != b'.' {
+                                    return Err(format!("invalid portal at {:?}", pos));
+                                }
                                 portals_entry.push(below_under_pos);
                                 let pt = if byte_grid.get(&(pos - Vec2(1, 0))).is_none() {
                                     PortalType::Outer
@@ -101,7 +106,9 @@ impl From<&str> for Maze {
                                     let right_right_pos = right_pos + Vec2(0, 1);
                                     let right_right_val =
                                         *byte_grid.get(&right_right_pos).unwrap_or(&b'#');
-                                    assert_eq!(right_right_val, b'.');
+                                    if right_right_val != b'.' {
+                                        return Err(format!("invalid portal at {:?}", pos));
+                                    }
                                     portals_entry.push(right_right_pos);
                                     let pt = if byte_grid.get(&(pos - Vec2(0, 1))).is_none() {
                                         PortalType::Outer
@@ -113,16 +120,20 @@ impl From<&str> for Maze {
                             }
                         }
                     }
-                    _ => panic!("invalid entry"),
+                    _ => return Err(format!("invalid byte '{}'", byte as u8)),
                 };
             }
         }
-        Maze { grid, portal_dests }
+        Ok(Maze { grid, portal_dests })
     }
 }
 
-fn bfs(maze: &Maze) -> usize {
-    let start = maze.portal_dests[&(b'A', b'A')][0];
+fn bfs(maze: &Maze) -> Result<usize, &'static str> {
+    let start = *maze
+        .portal_dests
+        .get(&(b'A', b'A'))
+        .and_then(|dests| dests.get(0))
+        .ok_or("cannot find starting portal")?;
     let mut seen = HashSet::new();
     let mut queue = VecDeque::new();
     queue.push_back((start, 0));
@@ -140,7 +151,7 @@ fn bfs(maze: &Maze) -> usize {
                 Entry::Passage => queue.push_back((npos, dist + 1)),
                 Entry::Portal(from, to, _pt) => {
                     if *from == b'Z' && *to == b'Z' {
-                        return dist;
+                        return Ok(dist);
                     }
                     if let Some(dest) = maze
                         .portal_dests
@@ -153,11 +164,16 @@ fn bfs(maze: &Maze) -> usize {
             }
         }
     }
-    panic!("could not find destination");
+
+    Err("could not find destination")
 }
 
-fn bfs_with_levels(maze: &Maze) -> usize {
-    let start = maze.portal_dests[&(b'A', b'A')][0];
+fn bfs_with_levels(maze: &Maze) -> Result<usize, &'static str> {
+    let start = *maze
+        .portal_dests
+        .get(&(b'A', b'A'))
+        .and_then(|dests| dests.get(0))
+        .ok_or("cannot find starting portal")?;
     let mut seen = HashSet::new();
     let mut queue = VecDeque::new();
     queue.push_back((start, 0, 0));
@@ -175,7 +191,7 @@ fn bfs_with_levels(maze: &Maze) -> usize {
                 Entry::Passage => queue.push_back((npos, level, dist + 1)),
                 Entry::Portal(from, to, pt) => {
                     if *from == b'Z' && *to == b'Z' && level == 0 {
-                        return dist;
+                        return Ok(dist);
                     }
                     if let Some(dest) = maze
                         .portal_dests
@@ -194,14 +210,15 @@ fn bfs_with_levels(maze: &Maze) -> usize {
             }
         }
     }
-    panic!("could not find destination");
+
+    Err("could not find destination")
 }
 
 fn main() {
     let input = include_str!("input.txt");
-    let maze: Maze = input.into();
-    let dist = bfs(&maze);
+    let maze = Maze::try_from(input).expect("failed to parse maze");
+    let dist = bfs(&maze).expect("failed to find dest for part 1");
     println!("Part 1: distance = {}", dist);
-    let dist = bfs_with_levels(&maze);
+    let dist = bfs_with_levels(&maze).expect("failed to find dest for part 2");
     println!("Part 2: distance = {}", dist);
 }
