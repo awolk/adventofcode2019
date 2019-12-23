@@ -112,10 +112,6 @@ impl Emulator {
         self.input.push_back(val);
     }
 
-    pub fn add_inputs(&mut self, vals: impl Iterator<Item = i64>) {
-        self.input.extend(vals);
-    }
-
     fn get(&self, address: i64) -> i64 {
         let address = address as usize;
         if address >= self.memory.len() {
